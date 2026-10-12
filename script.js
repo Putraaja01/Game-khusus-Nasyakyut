@@ -1,16 +1,58 @@
 const defaultVipDate = new Date();
 defaultVipDate.setDate(defaultVipDate.getDate() + 30);
 
-const allowedAccounts = {
+const defaultAccounts = {
     "dev": { pass: "123", role: "Developer", expiresAt: 0 },
     "vip_master": { pass: "vip2026", role: "VIP", expiresAt: defaultVipDate.getTime() },
     "player1": { pass: "game2026", role: "Standard", expiresAt: 0 }
 };
 
+let allowedAccounts = JSON.parse(localStorage.getItem('nexus_accounts')) || defaultAccounts;
+
+function saveAccounts() {
+    localStorage.setItem('nexus_accounts', JSON.stringify(allowedAccounts));
+}
+
 let currentUserRole = "Standard";
 let currentUsername = "";
-let playerCoins = parseInt(localStorage.getItem('nexus_coins')) || 100;
-let playerInventory = JSON.parse(localStorage.getItem('nexus_inventory')) || { hint: 1, doubleScore: 1, shield: 1 };
+
+// Profil unik per akun dengan koin default 0
+let userProfile = {
+    coins: 0,
+    inventory: { hint: 1, doubleScore: 1, shield: 1 },
+    lastCheckin: 0,
+    games: {}
+};
+
+function loadUserProfile(username) {
+    currentUsername = username;
+    let saved = localStorage.getItem('nexus_profile_' + username);
+    if (saved) {
+        try {
+            userProfile = JSON.parse(saved);
+        } catch(e) {
+            resetDefaultProfile();
+        }
+    } else {
+        resetDefaultProfile();
+    }
+}
+
+function resetDefaultProfile() {
+    userProfile = {
+        coins: 0,
+        inventory: { hint: 1, doubleScore: 1, shield: 1 },
+        lastCheckin: 0,
+        games: {}
+    };
+    saveUserProfile();
+}
+
+function saveUserProfile() {
+    if (currentUsername) {
+        localStorage.setItem('nexus_profile_' + currentUsername, JSON.stringify(userProfile));
+    }
+}
 
 let timerInterval = null;
 let chessGame = null;
@@ -18,11 +60,10 @@ let selectedSquare = null;
 
 function updateCoinDisplay() {
     const coinEl = document.getElementById('coin-display');
-    if (coinEl) coinEl.innerText = playerCoins;
+    if (coinEl) coinEl.innerText = userProfile.coins;
     const shopCoinsEl = document.getElementById('shop-coins');
-    if (shopCoinsEl) shopCoinsEl.innerText = playerCoins;
-    localStorage.setItem('nexus_coins', playerCoins);
-    localStorage.setItem('nexus_inventory', JSON.stringify(playerInventory));
+    if (shopCoinsEl) shopCoinsEl.innerText = userProfile.coins;
+    saveUserProfile();
     updateCheckinUIState();
 }
 
@@ -57,8 +98,9 @@ window.handleLogin = function(event) {
 
     if (allowedAccounts[usernameInput] && allowedAccounts[usernameInput].pass === passwordInput) {
         errorMsg.classList.add('hidden');
-        currentUsername = usernameInput;
         
+        loadUserProfile(usernameInput);
+
         let acc = allowedAccounts[usernameInput];
         let expiryTime = Number(acc.expiresAt);
         
@@ -66,6 +108,7 @@ window.handleLogin = function(event) {
             if (acc.role === "VIP") acc.role = "Standard";
             acc.expiresAt = 0;
             expiryTime = 0;
+            saveAccounts();
         }
 
         currentUserRole = acc.role;
@@ -125,6 +168,7 @@ function displayExpiryDate(expiryTime) {
             if (allowedAccounts[currentUsername]) {
                 allowedAccounts[currentUsername].role = "Standard";
                 allowedAccounts[currentUsername].expiresAt = 0;
+                saveAccounts();
             }
             currentUserRole = "Standard";
             document.getElementById('countdown-text').innerText = "Masa aktif kedaluwarsa!";
@@ -138,18 +182,17 @@ function displayExpiryDate(expiryTime) {
 }
 
 window.handleDailyCheckin = function() {
-    let lastCheckin = parseInt(localStorage.getItem('nexus_last_checkin')) || 0;
     let now = Date.now();
     let cooldown = 24 * 60 * 60 * 1000;
 
-    if (now - lastCheckin < cooldown) {
-        let timeLeft = cooldown - (now - lastCheckin);
+    if (now - userProfile.lastCheckin < cooldown) {
+        let timeLeft = cooldown - (now - userProfile.lastCheckin);
         let hours = Math.floor(timeLeft / (1000 * 60 * 60));
         let minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
         window.showModal("Check-in Belum Tersedia", `Anda sudah melakukan check-in hari ini. Silakan tunggu ${hours} jam ${minutes} menit lagi (1 kali per 24 jam).`, "⏳");
     } else {
-        playerCoins += 100;
-        localStorage.setItem('nexus_last_checkin', now);
+        userProfile.coins += 100;
+        userProfile.lastCheckin = now;
         updateCoinDisplay();
         window.showModal("Check-in Berhasil!", "Selamat! Anda mendapatkan +100 Koin Sanctuary hari ini.", "🎁");
         if (document.getElementById('content-title').innerText.includes("Check-in")) {
@@ -159,15 +202,14 @@ window.handleDailyCheckin = function() {
 };
 
 function updateCheckinUIState() {
-    let lastCheckin = parseInt(localStorage.getItem('nexus_last_checkin')) || 0;
     let now = Date.now();
     let cooldown = 24 * 60 * 60 * 1000;
     let statusEl = document.getElementById('dashboard-checkin-status');
     let btnEl = document.getElementById('dashboard-checkin-btn');
     if (!statusEl) return;
 
-    if (now - lastCheckin < cooldown) {
-        let timeLeft = cooldown - (now - lastCheckin);
+    if (now - userProfile.lastCheckin < cooldown) {
+        let timeLeft = cooldown - (now - userProfile.lastCheckin);
         let hours = Math.floor(timeLeft / (1000 * 60 * 60));
         let minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
         statusEl.innerText = `Sudah diklaim. Bisa check-in lagi dalam ${hours}j ${minutes}m`;
@@ -216,6 +258,8 @@ window.handleRegisterAccount = function(event) {
 
     let expiryTime = customDays > 0 ? Date.now() + (customDays * 86400000) : 0;
     allowedAccounts[usernameInput] = { pass: passwordInput, role: targetRole, expiresAt: expiryTime };
+    saveAccounts();
+
     errorMsg.classList.add('hidden');
     successMsg.innerText = `Akun ${targetRole} (${usernameInput}) berhasil dibuat!`;
     successMsg.classList.remove('hidden');
@@ -234,6 +278,8 @@ window.devDeleteUser = function(username) {
     }
     if(confirm(`Hapus user "${username}"?`)) {
         delete allowedAccounts[username];
+        localStorage.removeItem('nexus_profile_' + username);
+        saveAccounts();
         window.openMenu('dev-panel');
     }
 };
@@ -247,6 +293,7 @@ window.devExtendExpiry = function(username) {
             let acc = allowedAccounts[username];
             let baseTime = (acc.expiresAt > Date.now()) ? acc.expiresAt : Date.now();
             acc.expiresAt = baseTime + (addDays * 86400000);
+            saveAccounts();
             window.showModal("Berhasil", `Durasi akun ${username} ditambah ${addDays} hari!`, "✅");
             window.openMenu('dev-panel');
         }
@@ -276,10 +323,9 @@ window.openMenu = function(menuType) {
 
     if (menuType === 'checkin') {
         title.innerText = "Check-in Harian (1x per 24 Jam)";
-        let lastCheckin = parseInt(localStorage.getItem('nexus_last_checkin')) || 0;
         let now = Date.now();
         let cooldown = 24 * 60 * 60 * 1000;
-        let canClaim = (now - lastCheckin >= cooldown);
+        let canClaim = (now - userProfile.lastCheckin >= cooldown);
 
         container.innerHTML = `
             <div class="max-w-md mx-auto w-full text-center space-y-5">
@@ -447,7 +493,7 @@ window.openMenu = function(menuType) {
                 <div class="flex justify-between items-center bg-slate-900/90 p-3 sm:p-4 rounded-2xl border border-amber-500/30">
                     <div>
                         <p class="text-[10px] sm:text-xs text-slate-400 uppercase font-bold tracking-wider">Koin Anda</p>
-                        <p class="text-lg sm:text-xl font-mono font-black text-amber-400 flex items-center gap-1.5 mt-0.5"><span>🪙</span> <span id="shop-coins">${playerCoins}</span> Koin</p>
+                        <p class="text-lg sm:text-xl font-mono font-black text-amber-400 flex items-center gap-1.5 mt-0.5"><span>🪙</span> <span id="shop-coins">${userProfile.coins}</span> Koin</p>
                     </div>
                     <button onclick="openMenu('checkin')" class="px-3 sm:px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-xl text-[10px] sm:text-xs uppercase shadow transition">Check-in (+100)</button>
                 </div>
@@ -459,7 +505,7 @@ window.openMenu = function(menuType) {
                             <p class="text-[10px] sm:text-[11px] text-slate-400 mt-1">Membuka huruf/jawaban pertama saat terjebak di game kuis.</p>
                         </div>
                         <div class="space-y-2 pt-3 border-t border-slate-800">
-                            <div class="flex justify-between text-[11px] sm:text-xs font-mono text-amber-300"><span>Dimiliki: ${playerInventory.hint}</span><span>50 Koin</span></div>
+                            <div class="flex justify-between text-[11px] sm:text-xs font-mono text-amber-300"><span>Dimiliki: ${userProfile.inventory.hint}</span><span>50 Koin</span></div>
                             <button onclick="buyShopItem('hint', 50)" class="w-full py-2 bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-bold rounded-xl text-[11px] sm:text-xs uppercase shadow">Beli</button>
                         </div>
                     </div>
@@ -470,7 +516,7 @@ window.openMenu = function(menuType) {
                             <p class="text-[10px] sm:text-[11px] text-slate-400 mt-1">Melipatgandakan perolehan skor kuis (2x lipat) berikutnya.</p>
                         </div>
                         <div class="space-y-2 pt-3 border-t border-slate-800">
-                            <div class="flex justify-between text-[11px] sm:text-xs font-mono text-cyan-300"><span>Dimiliki: ${playerInventory.doubleScore}</span><span>80 Koin</span></div>
+                            <div class="flex justify-between text-[11px] sm:text-xs font-mono text-cyan-300"><span>Dimiliki: ${userProfile.inventory.doubleScore}</span><span>80 Koin</span></div>
                             <button onclick="buyShopItem('doubleScore', 80)" class="w-full py-2 bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold rounded-xl text-[11px] sm:text-xs uppercase shadow">Beli</button>
                         </div>
                     </div>
@@ -481,7 +527,7 @@ window.openMenu = function(menuType) {
                             <p class="text-[10px] sm:text-[11px] text-slate-400 mt-1">Melindungi agar skor tidak dikurangi saat jawaban salah.</p>
                         </div>
                         <div class="space-y-2 pt-3 border-t border-slate-800">
-                            <div class="flex justify-between text-[11px] sm:text-xs font-mono text-emerald-300"><span>Dimiliki: ${playerInventory.shield}</span><span>100 Koin</span></div>
+                            <div class="flex justify-between text-[11px] sm:text-xs font-mono text-emerald-300"><span>Dimiliki: ${userProfile.inventory.shield}</span><span>100 Koin</span></div>
                             <button onclick="buyShopItem('shield', 100)" class="w-full py-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold rounded-xl text-[11px] sm:text-xs uppercase shadow">Beli</button>
                         </div>
                     </div>
@@ -532,9 +578,9 @@ window.openMenu = function(menuType) {
 };
 
 window.buyShopItem = function(itemKey, cost) {
-    if (playerCoins >= cost) {
-        playerCoins -= cost;
-        playerInventory[itemKey]++;
+    if (userProfile.coins >= cost) {
+        userProfile.coins -= cost;
+        userProfile.inventory[itemKey]++;
         updateCoinDisplay();
         window.showModal("Pembelian Sukses", `Anda berhasil membeli 1x item bantuan!`, "🛒");
         window.openMenu('shop');
@@ -585,7 +631,10 @@ const bankTebakKata = [
 ];
 
 function initTebakKata(container) {
-    let state = JSON.parse(localStorage.getItem('nexus_tebakkata')) || { score: 0, index: 0 };
+    if (!userProfile.games.tebakkata) {
+        userProfile.games.tebakkata = { score: 0, index: 0 };
+    }
+    let state = userProfile.games.tebakkata;
     
     function render() {
         let qObj = bankTebakKata[state.index % bankTebakKata.length];
@@ -594,8 +643,8 @@ function initTebakKata(container) {
                 <div class="flex justify-between items-center bg-slate-900/80 p-3 rounded-xl border border-slate-800 text-xs">
                     <span class="text-amber-400 font-bold">Skor: ${state.score}</span>
                     <div class="flex gap-3">
-                        <span class="text-cyan-300">💡 Hint (${playerInventory.hint})</span>
-                        <span class="text-amber-300">⚡ 2x (${playerInventory.doubleScore})</span>
+                        <span class="text-cyan-300">💡 Hint (${userProfile.inventory.hint})</span>
+                        <span class="text-amber-300">⚡ 2x (${userProfile.inventory.doubleScore})</span>
                     </div>
                 </div>
                 <div class="p-6 bg-slate-900/90 border border-slate-800 rounded-2xl space-y-3">
@@ -609,12 +658,12 @@ function initTebakKata(container) {
                 <button onclick="resetTebakKataGame()" class="text-xs text-slate-500 hover:underline">Reset Progress</button>
             </div>
         `;
-        localStorage.setItem('nexus_tebakkata', JSON.stringify(state));
+        saveUserProfile();
     }
 
     window.useHintTebak = function(ans) {
-        if (playerInventory.hint > 0) {
-            playerInventory.hint--;
+        if (userProfile.inventory.hint > 0) {
+            userProfile.inventory.hint--;
             updateCoinDisplay();
             window.showModal("Hint Pintar Aktif", `Huruf pertama jawaban adalah: "${ans.charAt(0).toUpperCase()}"`, "💡");
             render();
@@ -628,20 +677,20 @@ function initTebakKata(container) {
         let qObj = bankTebakKata[state.index % bankTebakKata.length];
         let earned = 15;
         if (userAns === qObj.a) {
-            if (playerInventory.doubleScore > 0) {
-                playerInventory.doubleScore--;
+            if (userProfile.inventory.doubleScore > 0) {
+                userProfile.inventory.doubleScore--;
                 earned *= 2;
                 window.showModal("Double Score Aktif!", "Poin Anda digandakan 2x lipat!", "⚡");
             }
             state.score += earned;
-            playerCoins += 10;
+            userProfile.coins += 10;
             state.index++;
             updateCoinDisplay();
             window.showModal("Jawaban Benar!", `Hebat! Anda mendapatkan +${earned} Poin & +10 Koin Sanctuary.`, "🎉");
             render();
         } else {
-            if (playerInventory.shield > 0) {
-                playerInventory.shield--;
+            if (userProfile.inventory.shield > 0) {
+                userProfile.inventory.shield--;
                 updateCoinDisplay();
                 window.showModal("Shield Melindungi!", "Jawaban salah, namun Shield aktif sehingga skor aman.", "🛡️");
             } else {
@@ -651,8 +700,8 @@ function initTebakKata(container) {
     };
 
     window.resetTebakKataGame = function() {
-        localStorage.removeItem('nexus_tebakkata');
-        state = { score: 0, index: 0 };
+        userProfile.games.tebakkata = { score: 0, index: 0 };
+        state = userProfile.games.tebakkata;
         render();
     };
 
@@ -662,7 +711,10 @@ function initTebakKata(container) {
 const bankSusunKata = ["kamera", "sekolah", "komputer", "buku", "jendela", "matahari"];
 
 function initSusunKata(container) {
-    let state = JSON.parse(localStorage.getItem('nexus_susunkata')) || { score: 0, index: 0 };
+    if (!userProfile.games.susunkata) {
+        userProfile.games.susunkata = { score: 0, index: 0 };
+    }
+    let state = userProfile.games.susunkata;
 
     function getScrambledWord(word) {
         let arr = word.split('');
@@ -696,19 +748,19 @@ function initSusunKata(container) {
                 <button onclick="resetSusunKataGame()" class="text-xs text-slate-500 hover:underline">Reset Progress</button>
             </div>
         `;
-        localStorage.setItem('nexus_susunkata', JSON.stringify(state));
+        saveUserProfile();
     }
 
     window.checkSusunKata = function(ans) {
         let userAns = document.getElementById('susun-input').value.trim().toLowerCase();
         let earned = 20;
         if (userAns === ans) {
-            if (playerInventory.doubleScore > 0) {
-                playerInventory.doubleScore--;
+            if (userProfile.inventory.doubleScore > 0) {
+                userProfile.inventory.doubleScore--;
                 earned *= 2;
             }
             state.score += earned;
-            playerCoins += 15;
+            userProfile.coins += 15;
             state.index++;
             updateCoinDisplay();
             window.showModal("Benar!", `Susunan kata tepat! +${earned} Poin & +15 Koin Sanctuary.`, "🎉");
@@ -719,8 +771,8 @@ function initSusunKata(container) {
     };
 
     window.resetSusunKataGame = function() {
-        localStorage.removeItem('nexus_susunkata');
-        state = { score: 0, index: 0 };
+        userProfile.games.susunkata = { score: 0, index: 0 };
+        state = userProfile.games.susunkata;
         render();
     };
 
@@ -728,7 +780,10 @@ function initSusunKata(container) {
 }
 
 function initMatematika(container) {
-    let state = JSON.parse(localStorage.getItem('nexus_matematika')) || { score: 0, index: 0 };
+    if (!userProfile.games.matematika) {
+        userProfile.games.matematika = { score: 0, index: 0 };
+    }
+    let state = userProfile.games.matematika;
     let currentCorrectAns = 0;
 
     function generateMathProblem() {
@@ -764,19 +819,19 @@ function initMatematika(container) {
                 <button onclick="resetMathGame()" class="text-xs text-slate-500 hover:underline">Reset Progress</button>
             </div>
         `;
-        localStorage.setItem('nexus_matematika', JSON.stringify(state));
+        saveUserProfile();
     }
 
     window.checkMathAnswer = function(correctVal) {
         let userVal = parseInt(document.getElementById('math-input').value);
         let earned = 10;
         if (userVal === correctVal) {
-            if (playerInventory.doubleScore > 0) {
-                playerInventory.doubleScore--;
+            if (userProfile.inventory.doubleScore > 0) {
+                userProfile.inventory.doubleScore--;
                 earned *= 2;
             }
             state.score += earned;
-            playerCoins += 10;
+            userProfile.coins += 10;
             state.index++;
             updateCoinDisplay();
             window.showModal("Benar!", `Hitungan akurat! +${earned} Poin & +10 Koin Sanctuary.`, "✨");
@@ -789,8 +844,8 @@ function initMatematika(container) {
     };
 
     window.resetMathGame = function() {
-        localStorage.removeItem('nexus_matematika');
-        state = { score: 0, index: 0 };
+        userProfile.games.matematika = { score: 0, index: 0 };
+        state = userProfile.games.matematika;
         render();
     };
 
@@ -805,7 +860,10 @@ const bankEnglish = [
 ];
 
 function initBahasaInggris(container) {
-    let state = JSON.parse(localStorage.getItem('nexus_inggris')) || { score: 0, index: 0 };
+    if (!userProfile.games.inggris) {
+        userProfile.games.inggris = { score: 0, index: 0 };
+    }
+    let state = userProfile.games.inggris;
 
     function render() {
         let qObj = bankEnglish[state.index % bankEnglish.length];
@@ -827,18 +885,18 @@ function initBahasaInggris(container) {
                 <button onclick="resetEnglishGame()" class="text-xs text-slate-500 hover:underline">Reset Progress</button>
             </div>
         `;
-        localStorage.setItem('nexus_inggris', JSON.stringify(state));
+        saveUserProfile();
     }
 
     window.checkEnglishAnswer = function(selected, correct) {
         let earned = 15;
         if (selected === correct) {
-            if (playerInventory.doubleScore > 0) {
-                playerInventory.doubleScore--;
+            if (userProfile.inventory.doubleScore > 0) {
+                userProfile.inventory.doubleScore--;
                 earned *= 2;
             }
             state.score += earned;
-            playerCoins += 15;
+            userProfile.coins += 15;
             state.index++;
             updateCoinDisplay();
             window.showModal("Correct!", `Great job! +${earned} Poin & +15 Koin Sanctuary.`, "🇬🇧");
@@ -851,8 +909,8 @@ function initBahasaInggris(container) {
     };
 
     window.resetEnglishGame = function() {
-        localStorage.removeItem('nexus_inggris');
-        state = { score: 0, index: 0 };
+        userProfile.games.inggris = { score: 0, index: 0 };
+        state = userProfile.games.inggris;
         render();
     };
 
